@@ -1,21 +1,29 @@
-cabal-version:       >=1.10
-name:                rtp-opengl
-version:             0.1.0.0
-synopsis:            Real-Time Polygon Rendering
-description:
-  Real-Time Antialiased Polygon Rendering.
-license:             BSD3
-license-file:        LICENSE
-author:              Jonathan Merritt
-maintainer:          j.s.merritt@gmail.com
-category:            Graphics
-build-type:          Simple
-extra-source-files:  CHANGELOG.md
+cabal-version:      2.2
+name:               rtp-opengl
+version:            0.1.0.0
+synopsis:           Real-Time Polygon Rendering
+description:        Real-Time Antialiased Polygon Rendering.
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Jonathan Merritt
+maintainer:         j.s.merritt@gmail.com
+category:           Graphics
+build-type:         Simple
+extra-source-files: CHANGELOG.md
+
+common base
+  default-language: Haskell2010
+  build-depends:    base ^>=4.14.0.0
+
+common ghc-options
+  ghc-options:
+    -Wall -Wcompat -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wredundant-constraints
 
 executable rtp-opengl
-  main-is:             Main.hs
-  -- other-modules:
-  -- other-extensions:
-  build-depends:       base >=4.14 && <4.15
-  -- hs-source-dirs:
-  default-language:    Haskell2010
+  import:         base, ghc-options
+  hs-source-dirs: src
+  main-is:        Main.hs
+
+-- other-modules:
+-- other-extensions:
