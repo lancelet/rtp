@@ -22,8 +22,10 @@ common ghc-options
 
 executable rtp-opengl
   import:         base, ghc-options
-  hs-source-dirs: src
+  hs-source-dirs: app
   main-is:        Main.hs
 
--- other-modules:
--- other-extensions:
+library
+  import:          base, ghc-options
+  hs-source-dirs:  src
+  exposed-modules: RTP
