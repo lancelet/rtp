@@ -24,6 +24,9 @@ executable rtp-opengl
   import:         base, ghc-options
   hs-source-dirs: app
   main-is:        Main.hs
+  build-depends:
+    , gl    ^>=0.9
+    , sdl2  ^>=2.5.2.0
 
 library
   import:          base, ghc-options
