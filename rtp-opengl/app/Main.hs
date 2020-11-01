@@ -2,7 +2,8 @@
 
 module Main where
 
-import Control.Monad (unless)
+import Control.Exception.Safe (bracket)
+import Control.Monad (forM_, unless)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Foreign (Ptr, alloca, malloc, mallocArray, nullPtr, peek, withArray)
@@ -21,6 +22,7 @@ main = do
   SDL.initializeAll
   window <- SDL.createWindow "RTP - SDL Window" highDPIOpenGLWindow
   _ <- SDL.glCreateContext window
+  _program <- makeVertexFragmentProgram "shaders/shader.vert" "shaders/shader.frag"
   appLoop window
   SDL.destroyWindow window
   SDL.quit
@@ -30,7 +32,12 @@ highDPIOpenGLWindow =
   SDL.defaultWindow
     { SDL.windowInitialSize = V2 screenWidth screenHeight,
       SDL.windowHighDPI = True,
-      SDL.windowGraphicsContext = SDL.OpenGLContext SDL.defaultOpenGL
+      SDL.windowGraphicsContext =
+        SDL.OpenGLContext
+          ( SDL.defaultOpenGL
+              { SDL.glProfile = SDL.Core SDL.Debug 3 3
+              }
+          )
     }
 
 appLoop :: SDL.Window -> IO ()
@@ -56,16 +63,71 @@ eventIsQPress event =
 
 ---- SHADER STUFF
 
+newtype ShaderProgram = ShaderProgram {unShaderProgram :: GL.GLuint}
+
 newtype Shader = Shader {unShader :: GL.GLuint}
 
 data ShaderType
   = VertexShader
   | FragmentShader
 
+makeVertexFragmentProgram :: FilePath -> FilePath -> IO ShaderProgram
+makeVertexFragmentProgram vertexFile fragmentFile =
+  bracket
+    (makeShaderFromFile VertexShader vertexFile)
+    deleteShader
+    $ \vertexShader ->
+      bracket
+        (makeShaderFromFile FragmentShader fragmentFile)
+        deleteShader
+        $ \fragmentShader ->
+          makeProgram [vertexShader, fragmentShader]
+
+makeProgram :: [Shader] -> IO ShaderProgram
+makeProgram shaders = do
+  -- create the program; it's identified by a uint
+  uintId <- GL.glCreateProgram
+
+  -- attach all the shaders to the program
+  forM_ shaders $ \shader ->
+    GL.glAttachShader uintId (unShader shader)
+
+  -- link the program
+  GL.glLinkProgram uintId
+
+  -- check if the link was successful
+  linkedOk <- do
+    alloca $ \programOk -> do
+      GL.glGetProgramiv uintId GL.GL_LINK_STATUS programOk
+      programOkVal <- peek programOk
+      pure $ programOkVal == GL.GL_TRUE
+
+  -- if the linking failed; error with some useful information
+  unless linkedOk $ do
+    -- fetch the length of the log message
+    logLengthPtr <- malloc :: IO (Ptr GL.GLint)
+    GL.glGetProgramiv uintId GL.GL_INFO_LOG_LENGTH logLengthPtr
+    logLength <- peek logLengthPtr
+
+    -- fetch the log message
+    logMessagePtr <- mallocArray (fromIntegral logLength) :: IO (Ptr GL.GLchar)
+    GL.glGetProgramInfoLog uintId logLength nullPtr logMessagePtr
+    logMessage <- peekCString logMessagePtr
+
+    -- raise an exception with an error
+    error $ "Shader program failed to link: " <> logMessage
+
+  pure (ShaderProgram uintId)
+
 shaderTypeToGLenum :: ShaderType -> GL.GLenum
 shaderTypeToGLenum shaderType = case shaderType of
   VertexShader -> GL.GL_VERTEX_SHADER
   FragmentShader -> GL.GL_FRAGMENT_SHADER
+
+makeShaderFromFile :: ShaderType -> FilePath -> IO Shader
+makeShaderFromFile shaderType fileName = do
+  bsShaderSource <- B.readFile fileName
+  makeShader shaderType bsShaderSource
 
 makeShader :: ShaderType -> ByteString -> IO Shader
 makeShader shaderType source = do
@@ -88,7 +150,7 @@ makeShader shaderType source = do
     alloca $ \shaderOk -> do
       GL.glGetShaderiv uintId GL.GL_COMPILE_STATUS shaderOk
       shaderOkVal <- peek shaderOk
-      pure $ shaderOkVal == 0
+      pure $ shaderOkVal == GL.GL_TRUE
 
   -- if the shader failed to compile; dump some useful logging info
   unless compiledOk $ do
@@ -107,3 +169,6 @@ makeShader shaderType source = do
 
   -- return the shader
   pure (Shader uintId)
+
+deleteShader :: Shader -> IO ()
+deleteShader = GL.glDeleteShader . unShader
