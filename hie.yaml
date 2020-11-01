@@ -1,0 +1,6 @@
+cradle:
+  cabal:
+    - path: "./rtp-opengl/app"
+      component: "rtp-opengl:exe:rtp-opengl"
+    - path: "./rtp-opengl/src"
+      component: "rtp-opengl:lib:rtp-opengl"

@@ -25,8 +25,9 @@ executable rtp-opengl
   hs-source-dirs: app
   main-is:        Main.hs
   build-depends:
-    , gl    ^>=0.9
-    , sdl2  ^>=2.5.2.0
+    , bytestring  ^>=0.10.10.0
+    , gl          ^>=0.9
+    , sdl2        ^>=2.5.2.0
 
 library
   import:          base, ghc-options
