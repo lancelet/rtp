@@ -6,31 +6,48 @@ import Control.Exception.Safe (bracket)
 import Control.Monad (forM_, unless)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
-import Foreign (Ptr, alloca, malloc, mallocArray, nullPtr, peek, withArray)
+import Foreign (Ptr, alloca, castPtr, malloc, mallocArray, nullPtr, peek, sizeOf, withArray)
 import Foreign.C.String (peekCString)
-import Foreign.C.Types (CInt)
 import qualified Graphics.GL as GL
 import qualified SDL
 import SDL.Vect (V2 (V2))
 
-screenWidth, screenHeight :: CInt
+screenWidth, screenHeight :: Int
 screenWidth = 800
 screenHeight = 600
+
+data AppState = AppState
+  { shaderProgram :: ShaderProgram,
+    vertexBuffer :: Buffer
+  }
 
 main :: IO ()
 main = do
   SDL.initializeAll
   window <- SDL.createWindow "RTP - SDL Window" highDPIOpenGLWindow
   _ <- SDL.glCreateContext window
-  _program <- makeVertexFragmentProgram "shaders/shader.vert" "shaders/shader.frag"
-  appLoop window
+  shaderProg <- makeVertexFragmentProgram "shaders/shader.vert" "shaders/shader.frag"
+  vertexBuf <- createTriangleVertexBuffer
+  vaoUint <- alloca $ \ptr -> do
+    GL.glGenVertexArrays 1 ptr
+    peek ptr
+  GL.glBindVertexArray vaoUint
+  let appState =
+        AppState
+          { shaderProgram = shaderProg,
+            vertexBuffer = vertexBuf
+          }
+  appLoop window appState
   SDL.destroyWindow window
   SDL.quit
 
 highDPIOpenGLWindow :: SDL.WindowConfig
 highDPIOpenGLWindow =
   SDL.defaultWindow
-    { SDL.windowInitialSize = V2 screenWidth screenHeight,
+    { SDL.windowInitialSize =
+        V2
+          (fromIntegral screenWidth)
+          (fromIntegral screenHeight),
       SDL.windowHighDPI = True,
       SDL.windowGraphicsContext =
         SDL.OpenGLContext
@@ -40,18 +57,28 @@ highDPIOpenGLWindow =
           )
     }
 
-appLoop :: SDL.Window -> IO ()
-appLoop window = do
+appLoop :: SDL.Window -> AppState -> IO ()
+appLoop window appState = do
+  V2 w h <- SDL.glGetDrawableSize window
+  GL.glViewport 0 0 (fromIntegral w) (fromIntegral h)
+  GL.glClear GL.GL_COLOR_BUFFER_BIT
+  draw appState
+  SDL.glSwapWindow window
+
   events <- SDL.pollEvents
   let qPressed = any eventIsQPress events
-  GL.glClear GL.GL_COLOR_BUFFER_BIT
-  draw
-  SDL.glSwapWindow window
-  unless qPressed (appLoop window)
+  unless qPressed (appLoop window appState)
 
-draw :: IO ()
-draw = do
-  GL.glClear GL.GL_COLOR_BUFFER_BIT
+draw :: AppState -> IO ()
+draw appState = do
+  bindBuffer GL.GL_ARRAY_BUFFER (vertexBuffer appState)
+  GL.glVertexAttribPointer 0 3 GL.GL_FLOAT GL.GL_FALSE (fromIntegral (3 * sizeOf (undefined :: GL.GLfloat))) nullPtr
+  GL.glEnableVertexAttribArray 0
+
+  useProgram (shaderProgram appState)
+
+  GL.glDrawArrays GL.GL_TRIANGLES 0 3
+  GL.glDisableVertexAttribArray 0
 
 eventIsQPress :: SDL.Event -> Bool
 eventIsQPress event =
@@ -60,6 +87,25 @@ eventIsQPress event =
       SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
         && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
     _ -> False
+
+---- BUFFERS
+
+newtype Buffer = Buffer {unBuffer :: GL.GLuint}
+
+createTriangleVertexBuffer :: IO Buffer
+createTriangleVertexBuffer = do
+  let vertexData = [-1, -1, 0, 1, -1, 0, 0, 1, 0] :: [GL.GLfloat]
+  alloca $ \ptr -> do
+    GL.glGenBuffers 1 ptr
+    vboId <- peek ptr
+    GL.glBindBuffer GL.GL_ARRAY_BUFFER vboId
+    withArray vertexData $ \array -> do
+      let len = fromIntegral (sizeOf (undefined :: GL.GLfloat) * length vertexData)
+      GL.glBufferData GL.GL_ARRAY_BUFFER len (castPtr array) GL.GL_STATIC_DRAW
+    pure (Buffer vboId)
+
+bindBuffer :: GL.GLenum -> Buffer -> IO ()
+bindBuffer target = GL.glBindBuffer target . unBuffer
 
 ---- SHADER STUFF
 
@@ -80,8 +126,11 @@ makeVertexFragmentProgram vertexFile fragmentFile =
       bracket
         (makeShaderFromFile FragmentShader fragmentFile)
         deleteShader
-        $ \fragmentShader ->
-          makeProgram [vertexShader, fragmentShader]
+        $ \fragmentShader -> do
+          program <- makeProgram [vertexShader, fragmentShader]
+          detachShader program vertexShader
+          detachShader program fragmentShader
+          pure program
 
 makeProgram :: [Shader] -> IO ShaderProgram
 makeProgram shaders = do
@@ -172,3 +221,10 @@ makeShader shaderType source = do
 
 deleteShader :: Shader -> IO ()
 deleteShader = GL.glDeleteShader . unShader
+
+detachShader :: ShaderProgram -> Shader -> IO ()
+detachShader program shader =
+  GL.glDetachShader (unShaderProgram program) (unShader shader)
+
+useProgram :: ShaderProgram -> IO ()
+useProgram = GL.glUseProgram . unShaderProgram
